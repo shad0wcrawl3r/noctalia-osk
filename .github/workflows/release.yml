@@ -2,7 +2,7 @@ name: Release
 
 on:
   workflow_dispatch:
-  # Before LegionForge's daily image build (10:05 UTC); a compile takes ~70 min.
+  # Before Legix's daily image build (10:05 UTC); a compile takes ~70 min.
   schedule:
     - cron: '15 7 * * *'
   push:
@@ -155,7 +155,7 @@ jobs:
             echo "Fedora 45 \`noctalia-$EVR\` rebuilt with the lock-screen on-screen keyboard"
             echo "([noctalia-dev/noctalia#5233](https://github.com/noctalia-dev/noctalia/pull/5233)), patch revision $REV."
             echo
-            echo "**Built and tested only for [LegionForge](https://github.com/shad0wcrawl3r/LegionForge)**, which requires it. It's untested and unsupported anywhere else."
+            echo "**Built and tested only for [Legix](https://github.com/shad0wcrawl3r/legix)**, which requires it. It's untested and unsupported anywhere else."
             echo
             if [[ "$HAS_RPM" == true ]]; then
               echo "Verify:"
