@@ -100,6 +100,8 @@ jobs:
             echo "Fedora 45 \`noctalia-$EVR\` rebuilt with the lock-screen on-screen keyboard"
             echo "([noctalia-dev/noctalia#5233](https://github.com/noctalia-dev/noctalia/pull/5233)), patch revision $REV."
             echo
+            echo "**Built and tested only for [LegionForge](https://github.com/shad0wcrawl3r/LegionForge)**, which requires it. It's untested and unsupported anywhere else."
+            echo
             if [[ "$HAS_RPM" == true ]]; then
               echo "Verify:"
               echo '```sh'
