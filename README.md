@@ -6,6 +6,15 @@ the lock-screen on-screen keyboard from upstream PR
 for [LegionForge](https://github.com/shad0wcrawl3r/LegionForge) on handhelds without
 a keyboard. It adds `[lockscreen] keyboard = "auto" | "always" | "never"`.
 
+> [!IMPORTANT]
+> **Built and tested only for [LegionForge](https://github.com/shad0wcrawl3r/LegionForge).**
+> These RPMs are verified on LegionForge's image: Bazzite Deck (GNOME base) on Fedora 45,
+> with niri and Noctalia, on the original Lenovo Legion Go (Z1 Extreme). They're
+> LegionForge's required Noctalia build, and its image build fails without a verified
+> release from here. Anything else (other Fedora installs, other desktops or devices) is
+> untested and unsupported. Use them there at your own risk, and don't report problems with
+> them to the Noctalia project.
+
 ## How releases work
 
 - `.github/workflows/release.yml` runs daily, on changes to `patches/`, `build/` or
