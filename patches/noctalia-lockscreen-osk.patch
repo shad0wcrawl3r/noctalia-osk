@@ -1,0 +1,1107 @@
+Noctalia lock-screen on-screen keyboard.
+Upstream PR: https://github.com/noctalia-dev/noctalia/pull/5233
+Pinned head: whymusticode/noctalia@cff0dd078972a4ef35abd4c79f18da7000c5431b (MIT)
+Audited for LegionForge on 2026-11-20 (LFORGE-18): no logging, exec, network or file IO;
+key presses go through the lock surface's existing key path only while locked.
+Drop this patch once Fedora's noctalia package includes the feature (the build
+detects that and skips it).
+
+diff --git a/assets/translations/en.json b/assets/translations/en.json
+index 2954022916..1d3263441f 100644
+--- a/assets/translations/en.json
++++ b/assets/translations/en.json
+@@ -1666,6 +1666,11 @@
+         "low": "Low",
+         "normal": "Normal"
+       },
++      "on-screen-keyboard": {
++        "always": "Always",
++        "auto": "Auto (on touch)",
++        "never": "Never"
++      },
+       "orientation": {
+         "horizontal": "Horizontal",
+         "vertical": "Vertical"
+@@ -2640,6 +2645,10 @@
+           "description": "Allow passwordless unlock for this many seconds after locking; any keypress or mouse movement unlocks. Set to 0 to always require the password",
+           "label": "Grace Period"
+         },
++        "keyboard": {
++          "description": "Show an on-screen keyboard on the lock screen. Auto opens it when you touch the screen",
++          "label": "On-Screen Keyboard"
++        },
+         "lock-before-suspend": {
+           "description": "Lock the session before sleep (lid close, systemctl suspend, hibernate); Lock & Suspend actions still lock first",
+           "label": "Lock Before Suspend"
+diff --git a/docs/user/configuration/shell.mdx b/docs/user/configuration/shell.mdx
+index 33605a437a..119ac41678 100644
+--- a/docs/user/configuration/shell.mdx
++++ b/docs/user/configuration/shell.mdx
+@@ -557,6 +557,8 @@ When enabled and `wlr-screencopy` is available, Noctalia can capture the desktop
+ 
+ Configure under **`[lockscreen]`** in TOML, or use **Settings → Lock Screen**. The **Desktop capture** and transition controls appear only when your compositor supports screencopy. Use **Wallpaper** to pick a custom lock screen image (empty uses the desktop wallpaper per output). With **`[wallpaper].enabled = false`**, an empty **Wallpaper** shows a solid **`[wallpaper].fill_color`** background instead of an image, or opaque black when no fill color is set.
+ 
++**`keyboard`** controls the lock screen's on-screen keyboard, for unlocking a tablet or phone without a physical keyboard. The session lock hides every other application while locked, so an external keyboard such as wvkbd cannot appear there; Noctalia draws its own keyboard instead, using the current theme. With `"auto"` (default), touching the lock screen opens the keyboard, and it stays open while you type on it or on a physical keyboard; close it with its hide key or the toggle button. `"always"` shows it on every lock, and `"never"` removes it along with its toggle button. The keyboard button next to the password field shows or hides it in any mode except `"never"`. The keyboard has a US QWERTY layout plus two pages of symbols, and is docked at the bottom of the screen; the login box moves up when they would overlap.
++
+ The power buttons on the lock screen come from the session actions; to trigger one from the keyboard (for example suspend on Escape), set its `lockscreen_shortcut` as described in [Lock screen shortcuts](#lock-screen-shortcuts).
+ 
+ Lock screen transitions have their own effect pool, duration, and edge smoothness. They do not read or modify the settings under **`[wallpaper]`**. Set `transition = []` to disable lock and unlock animations.
+@@ -576,6 +578,7 @@ External sleep with **`lock_before_suspend = true`** waits for the same frames b
+ enabled               = true      # master switch for session lock
+ lock_before_suspend   = true      # lock on PrepareForSleep (lid close / systemctl suspend)
+ dnd                   = false     # enable Do Not Disturb while locked
++keyboard              = "auto"    # on-screen keyboard: "auto" (on touch), "always", or "never"
+ grace_period_seconds  = 0         # passwordless unlock window after locking; 0 (default) = off
+ fingerprint           = true      # allow fingerprint (PAM) authentication on the lock screen
+ allow_empty_password  = false     # submit Enter with an empty password (security-key PAM stacks)
+@@ -595,6 +598,7 @@ monitors              = []        # connectors that show the lock screen; empty
+ | `enabled`              | bool   | `true`      | Master switch for session lock, logind integration, and lock actions.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+ | `lock_before_suspend`  | bool   | `true`      | When `true`, hold a logind sleep-delay inhibitor and lock on `PrepareForSleep` before suspend/hibernate (including lid-close sleep). Set `false` to allow external suspend without locking; explicit **Lock and Suspend** actions still lock first.                                                                                                                                                                                                                                                                                                        |
+ | `dnd`                  | bool   | `false`     | Enable Do Not Disturb while the session is locked and restore the previous state on unlock. DND that was already enabled before locking stays enabled.                                                                                                                                                                                                                                                                                                                                                                                                     |
++| `keyboard`             | string | `"auto"`    | On-screen keyboard on the lock screen: `"auto"` opens it when the lock screen is touched, `"always"` shows it on every lock, `"never"` disables it.                                                                                                                                                                                                                                                                                                                                                                                                        |
+ | `grace_period_seconds` | int    | `0`         | Passwordless unlock window right after locking. Strictly opt-in: with the default `0`, every unlock requires authentication. When set to a value in `1`–`60`, any keypress or mouse movement of more than 5 px unlocks without a password for that many seconds after the lock starts, including idle-triggered locks; time spent suspended counts toward expiry. The window is always revoked when the session sleeps: locks engaged by `PrepareForSleep` or **Lock and Suspend** never offer passwordless unlock, and a resume clears whatever was left. |
+ | `fingerprint`          | bool   | `true`      | When `true`, fingerprint (PAM) authentication is offered on the lock screen alongside the password field. Set `false` to require password entry only.                                                                                                                                                                                                                                                                                                                                                                                                      |
+ | `allow_empty_password` | bool   | `false`     | When `true`, Enter can submit an empty password (needed for some security-key PAM stacks). When `false`, empty submits are ignored to avoid accidental `pam_faillock` lockouts from wake keys.                                                                                                                                                                                                                                                                                                                                                             |
+diff --git a/example.toml b/example.toml
+index 86576bb249..be38587dd0 100644
+--- a/example.toml
++++ b/example.toml
+@@ -260,6 +260,7 @@ privacy = true                      # microphone/camera/screen-share capture cha
+ 
+ [lockscreen]
+ enabled                 = true
++keyboard                = "auto"      # on-screen keyboard: "auto" (on touch), "always", or "never"
+ grace_period_seconds    = 0           # passwordless unlock on any keypress or mouse movement for this long after locking (opt-in; default 0 = off)
+ blurred_desktop         = false       # use a desktop snapshot as the lock screen background (requires wlr-screencopy)
+ transition              = ["fade", "wipe", "disc", "stripes", "zoom", "honeycomb", "vortex", "pixel", "diamond", "golden", "melt", "crt"] # empty disables lock/unlock animation
+diff --git a/meson.build b/meson.build
+index 69bed65b45..667b8d6a26 100644
+--- a/meson.build
++++ b/meson.build
+@@ -597,6 +597,7 @@ _noctalia_sources = files(
+   'src/shell/desktop/editor/desktop_widgets_editor_types.cpp',
+   'src/shell/desktop/editor/desktop_widgets_editor_settings.cpp',
+   'src/shell/desktop/desktop_widgets_host.cpp',
++  'src/shell/lockscreen/lockscreen_keyboard_layout.cpp',
+   'src/shell/lockscreen/lockscreen_login_box.cpp',
+   'src/shell/lockscreen/lockscreen_widgets_controller.cpp',
+   'src/shell/lockscreen/lockscreen_widgets_host.cpp',
+@@ -641,6 +642,7 @@ _noctalia_sources = files(
+   'src/shell/profile/avatar_path.cpp',
+   'src/shell/greeter/greeter_appearance_sync.cpp',
+   'src/shell/lockscreen/lock_screen.cpp',
++  'src/shell/lockscreen/lockscreen_keyboard.cpp',
+   'src/shell/lockscreen/lockscreen_session_actions.cpp',
+   'src/shell/lockscreen/lock_surface.cpp',
+   'src/shell/lockscreen/lockscreen_transition_cover.cpp',
+@@ -1300,6 +1302,7 @@ if build_tests
+     'lane_selection_token',
+     'launcher_category_state',
+     'location_service',
++    'lockscreen_keyboard_layout',
+     'lockscreen_session_actions',
+     'math_provider',
+     'monitor_selector',
+diff --git a/src/config/config_types.h b/src/config/config_types.h
+index 44e32d1893..f04baca4f1 100644
+--- a/src/config/config_types.h
++++ b/src/config/config_types.h
+@@ -313,6 +313,13 @@ struct ShellSessionConfig {
+   bool operator==(const ShellSessionConfig&) const = default;
+ };
+ 
++// Lock screen on-screen keyboard: Auto shows it when the lock screen is touched.
++enum class OnScreenKeyboardMode : std::uint8_t {
++  Auto = 0,
++  Always = 1,
++  Never = 2,
++};
++
+ struct ShellGreeterSyncConfig {
+   // Optional shell prefix before the apply helper and staging directory. Legacy
+   // sync accepts the configured escalator directly. Secure sync also appends
+@@ -612,6 +619,7 @@ struct BackdropConfig {
+ 
+ struct LockscreenConfig {
+   bool enabled = true;
++  OnScreenKeyboardMode keyboard = OnScreenKeyboardMode::Auto;
+   // Lock on PrepareForSleep (lid close / systemctl suspend) via logind sleep-delay inhibit.
+   // Distinct from idle/session lock_and_suspend actions.
+   bool lockBeforeSuspend = true;
+@@ -673,6 +681,12 @@ template <typename T, std::size_t N> constexpr std::string_view enumToKey(const
+   return {};
+ }
+ 
++constexpr EnumOption<OnScreenKeyboardMode> kOnScreenKeyboardModes[] = {
++    {OnScreenKeyboardMode::Auto, "auto", "settings.options.on-screen-keyboard.auto"},
++    {OnScreenKeyboardMode::Always, "always", "settings.options.on-screen-keyboard.always"},
++    {OnScreenKeyboardMode::Never, "never", "settings.options.on-screen-keyboard.never"},
++};
++
+ constexpr EnumOption<BarAccordionDirection> kBarAccordionDirections[] = {
+     {BarAccordionDirection::End, "end", "settings.options.accordion-direction.end"},
+     {BarAccordionDirection::Start, "start", "settings.options.accordion-direction.start"},
+diff --git a/src/config/schema/config_schema_desktop.cpp b/src/config/schema/config_schema_desktop.cpp
+index 85bb74b206..04269afb71 100644
+--- a/src/config/schema/config_schema_desktop.cpp
++++ b/src/config/schema/config_schema_desktop.cpp
+@@ -23,6 +23,7 @@ namespace noctalia::config::schema {
+     static const Schema<LockscreenConfig> s = {
+         field(&LockscreenConfig::enabled, "enabled"),
+         field(&LockscreenConfig::lockBeforeSuspend, "lock_before_suspend"),
++        enumField(&LockscreenConfig::keyboard, "keyboard", kOnScreenKeyboardModes),
+         field(&LockscreenConfig::dnd, "dnd"),
+         field(&LockscreenConfig::gracePeriodSeconds, "grace_period_seconds", Range<std::int64_t>{0, 60}),
+         field(&LockscreenConfig::fingerprint, "fingerprint"),
+diff --git a/src/shell/lockscreen/lock_surface.cpp b/src/shell/lockscreen/lock_surface.cpp
+index 87de82ef46..951c2c670e 100644
+--- a/src/shell/lockscreen/lock_surface.cpp
++++ b/src/shell/lockscreen/lock_surface.cpp
+@@ -606,6 +606,26 @@ LockSurface::LockSurface(WaylandConnection& connection, ConfigService* config) :
+       })
+   );
+ 
++  m_loginContentRow->addChild(
++      ui::button({
++          .out = &m_oskToggleButton,
++          .text = "",
++          .glyph = "keyboard",
++          .glyphSize = 16.0F,
++          .variant = ButtonVariant::Ghost,
++          .visible = false,
++          .onClick = [this] { setOskVisible(!m_oskVisible); },
++          .configure =
++              [](Button& button) {
++                button.setZIndex(2);
++                // Toggling the keyboard must not pull focus off the password field.
++                if (InputArea* area = button.inputArea(); area != nullptr) {
++                  area->setFocusable(false);
++                }
++              },
++      })
++  );
++
+   m_loginContentRow->addChild(
+       ui::button({
+           .out = &m_loginButton,
+@@ -638,6 +658,14 @@ LockSurface::LockSurface(WaylandConnection& connection, ConfigService* config) :
+       )
+   );
+ 
++  {
++    auto oskPanel = m_osk.build(
++        [this](const lockscreen_keyboard::KeyOutput& key) { injectOskKey(key); }, [this] { setOskVisible(false); }
++    );
++    oskPanel->setZIndex(3);
++    m_oskPanel = static_cast<Flex*>(m_root.addChild(std::move(oskPanel)));
++  }
++
+   {
+     auto transitionCover = std::make_unique<LockscreenTransitionCover>();
+     transitionCover->setVisible(false);
+@@ -757,8 +785,11 @@ void LockSurface::setLockedState(bool locked) {
+       m_passwordRevealButton->setGlyph("eye");
+     }
+     focusPasswordField();
++    m_osk.reset();
++    setOskVisible(oskMode() == OnScreenKeyboardMode::Always);
+   } else {
+     m_inputDispatcher.setFocus(nullptr);
++    setOskVisible(false);
+   }
+   requestUpdate();
+ }
+@@ -774,6 +805,49 @@ void LockSurface::focusPasswordField() {
+   m_inputDispatcher.setFocus(m_passwordField->inputArea());
+ }
+ 
++OnScreenKeyboardMode LockSurface::oskMode() const {
++  return m_config != nullptr ? m_config->config().lockscreen.keyboard : OnScreenKeyboardMode::Auto;
++}
++
++void LockSurface::setOskVisible(bool visible) {
++  if (visible && (oskMode() == OnScreenKeyboardMode::Never || !m_locked || m_blackout)) {
++    visible = false;
++  }
++  if (m_oskVisible == visible) {
++    return;
++  }
++  m_oskVisible = visible;
++  if (!visible) {
++    m_osk.reset();
++  }
++  m_osk.setVisible(visible);
++  requestLayout();
++}
++
++void LockSurface::maybeShowOskForTouch(float sceneX, float sceneY) {
++  // A tablet has no other way to type, so any touch on the lock surface brings the keyboard up,
++  // except touches on the keyboard itself or on its toggle (which handles visibility on its own).
++  if (m_oskVisible || !m_locked || oskMode() != OnScreenKeyboardMode::Auto) {
++    return;
++  }
++  if (m_oskToggleButton != nullptr
++      && m_oskToggleButton->visible()
++      && m_oskToggleButton->containsScenePoint(sceneX, sceneY)) {
++    return;
++  }
++  setOskVisible(true);
++}
++
++void LockSurface::injectOskKey(const lockscreen_keyboard::KeyOutput& key) {
++  if (!m_locked || m_blackout) {
++    return;
++  }
++  KeyboardEvent event{.sym = key.sym, .utf32 = key.utf32, .pressed = true};
++  dispatchKeyboardEvent(event);
++  event.pressed = false;
++  dispatchKeyboardEvent(event);
++}
++
+ void LockSurface::setPromptState(
+     std::string user, std::string password, std::string status, bool error, bool authenticating
+ ) {
+@@ -1014,6 +1088,7 @@ void LockSurface::setBlackout(bool blackout) {
+   m_blackout = blackout;
+   if (m_blackout) {
+     m_inputDispatcher.setFocus(nullptr);
++    setOskVisible(false);
+     cancelTransitionAnimation();
+     m_transitionPhase = TransitionPhase::Disabled;
+     m_transitionProgress = 1.0F;
+@@ -1066,6 +1141,9 @@ void LockSurface::onPointerEvent(const PointerEvent& event) {
+     const bool pressed = event.pressed;
+     const auto x = static_cast<float>(event.sx);
+     const auto y = static_cast<float>(event.sy);
++    if (m_locked && pressed && event.touch) {
++      maybeShowOskForTouch(x, y);
++    }
+     if (m_locked && pressed && passwordFieldContainsPoint(x, y)) {
+       focusPasswordField();
+     }
+@@ -1138,6 +1216,10 @@ void LockSurface::onKeyboardEvent(const KeyboardEvent& event) {
+     }
+   }
+ 
++  dispatchKeyboardEvent(event);
++}
++
++void LockSurface::dispatchKeyboardEvent(const KeyboardEvent& event) {
+   if (m_locked
+       && event.pressed
+       && m_passwordField != nullptr
+@@ -1198,6 +1280,7 @@ void LockSurface::layoutCoverOnly(std::uint32_t width, std::uint32_t height) {
+   m_widgetLayer->setVisible(false);
+   m_loginPanel->setVisible(false);
+   m_authPanel->setVisible(false);
++  m_oskPanel->setVisible(false);
+   layoutTransitionCover();
+   syncTransitionCover();
+ }
+@@ -1350,6 +1433,7 @@ void LockSurface::layoutScene(std::uint32_t width, std::uint32_t height) {
+     if (m_authPanel != nullptr) {
+       m_authPanel->setVisible(false);
+     }
++    m_oskPanel->setVisible(false);
+     layoutTransitionCover();
+     syncTransitionCover();
+     return;
+@@ -1374,6 +1458,11 @@ void LockSurface::layoutScene(std::uint32_t width, std::uint32_t height) {
+     }
+   }
+   m_loginButton->setVisible(loginVisible && loginStyle.showLoginButton);
++  if (m_oskToggleButton != nullptr) {
++    m_oskToggleButton->setVisible(loginVisible && oskMode() != OnScreenKeyboardMode::Never);
++    m_oskToggleButton->setSelected(m_oskVisible);
++  }
++  m_oskPanel->setVisible(m_oskVisible);
+ 
+   const bool regular = loginVisible && loginStyle.layout == lockscreen_login_box::LayoutMode::Regular;
+   ensureLayoutChipInPasswordRow();
+@@ -1404,6 +1493,19 @@ void LockSurface::layoutScene(std::uint32_t width, std::uint32_t height) {
+   panelX = util::clampOrdered(panelX, Style::spaceLg, sw - panelWidth - Style::spaceLg);
+   panelY = util::clampOrdered(panelY, Style::spaceLg, sh - panelHeight - Style::spaceLg);
+ 
++  // On-screen keyboard: docked to the bottom edge; lift the login box above it when they'd overlap.
++  LayoutRect oskRect{};
++  if (m_oskVisible) {
++    constexpr float kOskMaxWidth = 960.0F;
++    const float oskW = std::min(sw - Style::spaceSm * 2.0F, kOskMaxWidth);
++    const float oskH = std::min(LockscreenKeyboard::preferredHeight(oskW), sh * 0.5F);
++    oskRect = LayoutRect{std::round((sw - oskW) * 0.5F), sh - oskH - Style::spaceSm, oskW, oskH};
++    const float limit = oskRect.y - Style::spaceLg;
++    if (panelY + panelHeight > limit) {
++      panelY = std::max(Style::spaceLg, limit - panelHeight);
++    }
++  }
++
+   m_root.setSize(sw, sh);
+ 
+   m_backgroundLayer->setPosition(0.0F, 0.0F);
+@@ -1670,8 +1772,19 @@ void LockSurface::layoutScene(std::uint32_t width, std::uint32_t height) {
+     m_passwordRevealButton->setGlyphSize(sessionGlyphSize);
+   }
+ 
++  if (m_oskToggleButton != nullptr) {
++    m_oskToggleButton->setRadius(Style::scaledRadius(loginStyle.inputRadius));
++    m_oskToggleButton->setSize(controlHeight, controlHeight);
++    m_oskToggleButton->setGlyphSize(sessionGlyphSize);
++  }
++
+   m_loginPanel->arrange(renderer, LayoutRect{panelX, panelY, panelWidth, panelHeight});
+ 
++  if (m_oskVisible) {
++    m_osk.setRadius(Style::scaledRadius(loginStyle.panelRadius), Style::scaledRadius(loginStyle.inputRadius));
++    m_osk.arrange(renderer, oskRect);
++  }
++
+   // Auth panel: sibling above/below the login box (flips below when near the top edge).
+   if (m_authPanel != nullptr && m_authLabel != nullptr) {
+     bool statusError = false;
+diff --git a/src/shell/lockscreen/lock_surface.h b/src/shell/lockscreen/lock_surface.h
+index e23ceca9c3..61f42a730f 100644
+--- a/src/shell/lockscreen/lock_surface.h
++++ b/src/shell/lockscreen/lock_surface.h
+@@ -8,6 +8,7 @@
+ #include "render/core/texture_manager.h"
+ #include "render/scene/input_dispatcher.h"
+ #include "render/scene/node.h"
++#include "shell/lockscreen/lockscreen_keyboard.h"
+ #include "shell/lockscreen/lockscreen_login_box.h"
+ #include "shell/render/blur_cache.h"
+ #include "shell/render/lockscreen_transition_types.h"
+@@ -154,6 +155,11 @@ class LockSurface : public Surface {
+   std::string resolveStatusText(const lockscreen_login_box::LoginBoxStyle& style, bool& isError) const;
+   bool passwordFieldContainsPoint(float sceneX, float sceneY) const;
+   void focusPasswordField();
++  void dispatchKeyboardEvent(const KeyboardEvent& event);
++  void injectOskKey(const lockscreen_keyboard::KeyOutput& key);
++  OnScreenKeyboardMode oskMode() const;
++  void setOskVisible(bool visible);
++  void maybeShowOskForTouch(float sceneX, float sceneY);
+ 
+   ext_session_lock_surface_v1* m_lockSurface = nullptr;
+   wl_output* m_output = nullptr;
+@@ -195,6 +201,10 @@ class LockSurface : public Surface {
+   Button* m_passwordRevealButton = nullptr;
+   Button* m_loginButton = nullptr;
+   Button* m_layoutChip = nullptr;
++  Button* m_oskToggleButton = nullptr;
++  Flex* m_oskPanel = nullptr;
++  LockscreenKeyboard m_osk;
++  bool m_oskVisible = false;
+   Flex* m_sessionRow = nullptr;
+   std::vector<Button*> m_sessionButtons;
+   SharedTextureCache* m_textureCache = nullptr;
+diff --git a/src/shell/lockscreen/lockscreen_keyboard.cpp b/src/shell/lockscreen/lockscreen_keyboard.cpp
+new file mode 100644
+index 0000000000..513f384a1d
+--- /dev/null
++++ b/src/shell/lockscreen/lockscreen_keyboard.cpp
+@@ -0,0 +1,231 @@
++#include "shell/lockscreen/lockscreen_keyboard.h"
++
++#include "render/scene/input_area.h"
++#include "render/scene/node.h"
++#include "ui/builders.h"
++#include "ui/controls/button.h"
++#include "ui/controls/flex.h"
++#include "ui/controls/glyph.h"
++#include "ui/palette.h"
++#include "ui/style.h"
++
++#include <algorithm>
++#include <cmath>
++#include <string>
++
++namespace {
++
++  using lockscreen_keyboard::KeyAction;
++  using lockscreen_keyboard::KeyCap;
++  using lockscreen_keyboard::Layer;
++
++  constexpr float kKeyGap = Style::spaceXs + 2.0F;
++  constexpr float kPanelPadding = Style::spaceSm;
++  constexpr float kRowUnits = 10.0F;
++  constexpr float kMinKeyHeight = 40.0F;
++  constexpr float kMaxKeyHeight = 58.0F;
++
++  ButtonVariant variantFor(KeyAction action) {
++    switch (action) {
++    case KeyAction::Character:
++    case KeyAction::Space:
++      return ButtonVariant::Default;
++    case KeyAction::Enter:
++      return ButtonVariant::Primary;
++    default:
++      return ButtonVariant::Secondary;
++    }
++  }
++
++  float keyUnitWidth(float panelWidth) {
++    const float inner = std::max(0.0F, panelWidth - kPanelPadding * 2.0F);
++    return std::max(0.0F, (inner - kKeyGap * (kRowUnits - 1.0F)) / kRowUnits);
++  }
++
++  float keyHeightFor(float panelWidth) {
++    // Keys stay roughly square on phones and get flatter on wide screens.
++    return std::clamp(std::round(keyUnitWidth(panelWidth) * 1.1F), kMinKeyHeight, kMaxKeyHeight);
++  }
++
++} // namespace
++
++std::unique_ptr<Flex> LockscreenKeyboard::build(KeyCallback onKey, std::function<void()> onHide) {
++  m_onKey = std::move(onKey);
++  m_onHide = std::move(onHide);
++  m_rows.clear();
++  m_keys.clear();
++  m_layer = Layer::Lower;
++
++  auto panel = ui::flex(
++      FlexDirection::Vertical,
++      {
++          .out = &m_panel,
++          .align = FlexAlign::Center,
++          .justify = FlexJustify::Start,
++          .gap = kKeyGap,
++          .padding = kPanelPadding,
++          .fill = colorSpecFromRole(ColorRole::SurfaceContainer, 0.94F),
++          .radius = Style::radiusXl,
++          .border = colorSpecFromRole(ColorRole::OutlineVariant),
++          .visible = false,
++      }
++  );
++
++  const auto& rows = lockscreen_keyboard::rowsFor(m_layer);
++  for (std::size_t r = 0; r < rows.size(); ++r) {
++    Flex* rowFlex = nullptr;
++    panel->addChild(
++        ui::flex(
++            FlexDirection::Horizontal,
++            {
++                .out = &rowFlex,
++                .align = FlexAlign::Center,
++                .justify = FlexJustify::Center,
++                .gap = kKeyGap,
++                .widthPolicy = FlexSizePolicy::Fill,
++                .heightPolicy = FlexSizePolicy::Content,
++            }
++        )
++    );
++    m_rows.push_back(rowFlex);
++
++    for (std::size_t i = 0; i < rows[r].size(); ++i) {
++      const KeyCap& key = rows[r][i];
++      Button* button = nullptr;
++      rowFlex->addChild(
++          ui::button({
++              .out = &button,
++              .text = "",
++              .variant = variantFor(key.action),
++              .onClick = [this, r, i] { handlePress(r, i); },
++              .configure =
++                  [](Button& b) {
++                    // Keys must never take focus: a press would blur the password field (dropping its
++                    // text-input state), so the next physical key after hiding the keyboard is lost.
++                    b.setTabStop(false);
++                    if (InputArea* area = b.inputArea(); area != nullptr) {
++                      area->setFocusable(false);
++                    }
++                  },
++          })
++      );
++      m_keys.push_back(KeySlot{.button = button, .row = r, .index = i});
++    }
++  }
++
++  applyLayer();
++  return panel;
++}
++
++float LockscreenKeyboard::preferredHeight(float width) noexcept {
++  const auto rows = static_cast<float>(lockscreen_keyboard::kRowCount);
++  return keyHeightFor(width) * rows + kKeyGap * (rows - 1.0F) + kPanelPadding * 2.0F;
++}
++
++void LockscreenKeyboard::setVisible(bool visible) {
++  m_visible = visible;
++  if (m_panel != nullptr) {
++    m_panel->setVisible(visible);
++  }
++}
++
++void LockscreenKeyboard::setRadius(float panelRadius, float keyRadius) {
++  m_keyRadius = keyRadius;
++  if (m_panel != nullptr) {
++    m_panel->setRadius(panelRadius);
++  }
++}
++
++void LockscreenKeyboard::reset() {
++  if (m_layer != Layer::Lower) {
++    m_layer = Layer::Lower;
++    applyLayer();
++  }
++}
++
++void LockscreenKeyboard::handlePress(std::size_t row, std::size_t index) {
++  const auto& rows = lockscreen_keyboard::rowsFor(m_layer);
++  if (row >= rows.size() || index >= rows[row].size()) {
++    return;
++  }
++  const KeyCap key = rows[row][index];
++
++  if (key.action == KeyAction::Hide) {
++    if (m_onHide) {
++      m_onHide();
++    }
++    return;
++  }
++
++  if (const auto output = lockscreen_keyboard::outputFor(key); output.has_value() && m_onKey) {
++    m_onKey(*output);
++  }
++
++  const Layer next = lockscreen_keyboard::nextLayer(m_layer, key.action);
++  if (next != m_layer) {
++    m_layer = next;
++    applyLayer();
++  }
++}
++
++void LockscreenKeyboard::applyLayer() {
++  const auto& rows = lockscreen_keyboard::rowsFor(m_layer);
++  for (const KeySlot& slot : m_keys) {
++    if (slot.button == nullptr || slot.row >= rows.size() || slot.index >= rows[slot.row].size()) {
++      continue;
++    }
++    const KeyCap& key = rows[slot.row][slot.index];
++    if (key.action == KeyAction::Character) {
++      // Character slots never carry a glyph (Button would otherwise draw a placeholder icon).
++      slot.button->setText(key.text);
++      continue;
++    }
++    const std::string_view glyph = lockscreen_keyboard::specialGlyph(key.action, m_layer);
++    slot.button->setText(lockscreen_keyboard::specialLabel(key.action, m_layer));
++    if (!glyph.empty()) {
++      slot.button->setGlyph(glyph);
++    }
++    // Button hides an empty label itself but never its glyph.
++    if (auto* glyphNode = slot.button->glyph(); glyphNode != nullptr) {
++      glyphNode->setVisible(!glyph.empty());
++    }
++  }
++}
++
++void LockscreenKeyboard::arrange(Renderer& renderer, const LayoutRect& rect) {
++  if (m_panel == nullptr) {
++    return;
++  }
++  const float unit = keyUnitWidth(rect.width);
++  const float keyHeight = keyHeightFor(rect.width);
++  const float fontSize = std::clamp(std::round(keyHeight * 0.38F), Style::fontSizeBody, Style::fontSizeHeader);
++  const float glyphSize = std::round(fontSize * 1.1F);
++
++  const auto& rows = lockscreen_keyboard::rowsFor(m_layer);
++  for (const KeySlot& slot : m_keys) {
++    if (slot.button == nullptr || slot.row >= rows.size() || slot.index >= rows[slot.row].size()) {
++      continue;
++    }
++    const float units = rows[slot.row][slot.index].width;
++    const float keyWidth = std::floor(unit * units + kKeyGap * (units - 1.0F));
++    // An explicit size counts as an assigned box for Button, which otherwise squares glyph-only keys
++    // (Shift, Backspace) to their width whenever they are re-laid out after a relabel.
++    slot.button->setSize(keyWidth, keyHeight);
++    slot.button->setMinWidth(keyWidth);
++    slot.button->setMaxWidth(keyWidth);
++    slot.button->setMinHeight(keyHeight);
++    slot.button->setMaxHeight(keyHeight);
++    slot.button->setControlHeight(keyHeight);
++    slot.button->setFontSize(fontSize);
++    if (slot.button->glyph() != nullptr) {
++      slot.button->setGlyphSize(glyphSize);
++    }
++    slot.button->setRadius(m_keyRadius);
++  }
++
++  m_panel->setMinWidth(rect.width);
++  m_panel->setMaxWidth(rect.width);
++  m_panel->setMinHeight(rect.height);
++  m_panel->setMaxHeight(rect.height);
++  m_panel->arrange(renderer, rect);
++}
+diff --git a/src/shell/lockscreen/lockscreen_keyboard.h b/src/shell/lockscreen/lockscreen_keyboard.h
+new file mode 100644
+index 0000000000..72116cf129
+--- /dev/null
++++ b/src/shell/lockscreen/lockscreen_keyboard.h
+@@ -0,0 +1,56 @@
++#pragma once
++
++#include "shell/lockscreen/lockscreen_keyboard_layout.h"
++
++#include <functional>
++#include <memory>
++#include <vector>
++
++class Button;
++class Flex;
++class Renderer;
++struct LayoutRect;
++
++// On-screen keyboard drawn on the lock surface. The session lock hides every other client's
++// surfaces, so an external OSK cannot appear here; this one is plain noctalia controls and feeds
++// synthesized key events back to its owner.
++class LockscreenKeyboard {
++public:
++  using KeyCallback = std::function<void(const lockscreen_keyboard::KeyOutput&)>;
++
++  LockscreenKeyboard() = default;
++  LockscreenKeyboard(const LockscreenKeyboard&) = delete;
++  LockscreenKeyboard& operator=(const LockscreenKeyboard&) = delete;
++
++  // Builds the keyboard panel. The caller adds the returned node to its scene and keeps it alive at
++  // least as long as this object is used.
++  [[nodiscard]] std::unique_ptr<Flex> build(KeyCallback onKey, std::function<void()> onHide);
++
++  // Preferred height for a given panel width.
++  [[nodiscard]] static float preferredHeight(float width) noexcept;
++
++  void setVisible(bool visible);
++  [[nodiscard]] bool visible() const noexcept { return m_visible; }
++  void setRadius(float panelRadius, float keyRadius);
++  void reset(); // back to the lowercase layer
++  void arrange(Renderer& renderer, const LayoutRect& rect);
++
++private:
++  struct KeySlot {
++    Button* button = nullptr;
++    std::size_t row = 0;
++    std::size_t index = 0;
++  };
++
++  void handlePress(std::size_t row, std::size_t index);
++  void applyLayer();
++
++  Flex* m_panel = nullptr;
++  std::vector<Flex*> m_rows;
++  std::vector<KeySlot> m_keys;
++  lockscreen_keyboard::Layer m_layer = lockscreen_keyboard::Layer::Lower;
++  KeyCallback m_onKey;
++  std::function<void()> m_onHide;
++  float m_keyRadius = 6.0F;
++  bool m_visible = false;
++};
+diff --git a/src/shell/lockscreen/lockscreen_keyboard_layout.cpp b/src/shell/lockscreen/lockscreen_keyboard_layout.cpp
+new file mode 100644
+index 0000000000..26f485a1bf
+--- /dev/null
++++ b/src/shell/lockscreen/lockscreen_keyboard_layout.cpp
+@@ -0,0 +1,212 @@
++#include "shell/lockscreen/lockscreen_keyboard_layout.h"
++
++#include <xkbcommon/xkbcommon-keysyms.h>
++#include <xkbcommon/xkbcommon.h>
++
++namespace lockscreen_keyboard {
++
++  namespace {
++
++    constexpr KeyCap ch(std::string_view text) { return KeyCap{.action = KeyAction::Character, .text = text}; }
++    constexpr KeyCap special(KeyAction action, float width) { return KeyCap{.action = action, .width = width}; }
++
++    // Shared bottom row: [hide] [layer] [space] [.] [enter]
++    constexpr std::array kBottomRow = {
++        special(KeyAction::Hide, 1.0F),  special(KeyAction::LayerToggle, 1.5F),
++        special(KeyAction::Space, 5.0F), ch("."),
++        special(KeyAction::Enter, 1.5F),
++    };
++
++    constexpr std::array kLowerRow0 = {ch("q"), ch("w"), ch("e"), ch("r"), ch("t"),
++                                       ch("y"), ch("u"), ch("i"), ch("o"), ch("p")};
++    constexpr std::array kLowerRow1 = {ch("a"), ch("s"), ch("d"), ch("f"), ch("g"), ch("h"), ch("j"), ch("k"), ch("l")};
++    constexpr std::array kLowerRow2 = {
++        special(KeyAction::Shift, 1.5F),     ch("z"), ch("x"), ch("c"), ch("v"), ch("b"), ch("n"), ch("m"),
++        special(KeyAction::Backspace, 1.5F),
++    };
++
++    constexpr std::array kUpperRow0 = {ch("Q"), ch("W"), ch("E"), ch("R"), ch("T"),
++                                       ch("Y"), ch("U"), ch("I"), ch("O"), ch("P")};
++    constexpr std::array kUpperRow1 = {ch("A"), ch("S"), ch("D"), ch("F"), ch("G"), ch("H"), ch("J"), ch("K"), ch("L")};
++    constexpr std::array kUpperRow2 = {
++        special(KeyAction::Shift, 1.5F),     ch("Z"), ch("X"), ch("C"), ch("V"), ch("B"), ch("N"), ch("M"),
++        special(KeyAction::Backspace, 1.5F),
++    };
++
++    constexpr std::array kSymbolsRow0 = {ch("1"), ch("2"), ch("3"), ch("4"), ch("5"),
++                                         ch("6"), ch("7"), ch("8"), ch("9"), ch("0")};
++    constexpr std::array kSymbolsRow1 = {ch("@"), ch("#"), ch("$"), ch("%"), ch("&"),
++                                         ch("-"), ch("+"), ch("("), ch(")")};
++    constexpr std::array kSymbolsRow2 = {
++        special(KeyAction::Shift, 1.5F),     ch("*"), ch("\""), ch("'"), ch(":"), ch(";"), ch("!"), ch("?"),
++        special(KeyAction::Backspace, 1.5F),
++    };
++
++    constexpr std::array kSymbolsAltRow0 = {ch("~"), ch("`"), ch("|"), ch("\\"), ch("/"),
++                                            ch("_"), ch("="), ch("^"), ch("["),  ch("]")};
++    constexpr std::array kSymbolsAltRow1 = {ch("{"), ch("}"), ch("<"), ch(">"), ch(","),
++                                            ch("€"), ch("£"), ch("¥"), ch("°")};
++    constexpr std::array kSymbolsAltRow2 = {
++        special(KeyAction::Shift, 1.5F),     ch("§"), ch("¢"), ch("×"), ch("÷"), ch("¿"), ch("¡"), ch("•"),
++        special(KeyAction::Backspace, 1.5F),
++    };
++
++    const LayerRows kLowerRows = {kLowerRow0, kLowerRow1, kLowerRow2, kBottomRow};
++    const LayerRows kUpperRows = {kUpperRow0, kUpperRow1, kUpperRow2, kBottomRow};
++    const LayerRows kSymbolsRows = {kSymbolsRow0, kSymbolsRow1, kSymbolsRow2, kBottomRow};
++    const LayerRows kSymbolsAltRows = {kSymbolsAltRow0, kSymbolsAltRow1, kSymbolsAltRow2, kBottomRow};
++
++    // Decodes the first UTF-8 codepoint of `text`; 0 for empty or malformed input.
++    std::uint32_t firstCodepoint(std::string_view text) noexcept {
++      if (text.empty()) {
++        return 0;
++      }
++      const auto b0 = static_cast<unsigned char>(text[0]);
++      std::size_t length = 0;
++      std::uint32_t cp = 0;
++      if (b0 < 0x80U) {
++        return b0;
++      }
++      if ((b0 & 0xE0U) == 0xC0U) {
++        length = 2;
++        cp = b0 & 0x1FU;
++      } else if ((b0 & 0xF0U) == 0xE0U) {
++        length = 3;
++        cp = b0 & 0x0FU;
++      } else if ((b0 & 0xF8U) == 0xF0U) {
++        length = 4;
++        cp = b0 & 0x07U;
++      } else {
++        return 0;
++      }
++      if (text.size() < length) {
++        return 0;
++      }
++      for (std::size_t i = 1; i < length; ++i) {
++        const auto b = static_cast<unsigned char>(text[i]);
++        if ((b & 0xC0U) != 0x80U) {
++          return 0;
++        }
++        cp = (cp << 6U) | (b & 0x3FU);
++      }
++      return cp;
++    }
++
++    KeyOutput fromKeysym(std::uint32_t sym) noexcept {
++      // Match what a hardware key reports: xkb gives Return -> '\r' and BackSpace -> '\b'.
++      return KeyOutput{.sym = sym, .utf32 = xkb_keysym_to_utf32(sym)};
++    }
++
++  } // namespace
++
++  const LayerRows& rowsFor(Layer layer) noexcept {
++    switch (layer) {
++    case Layer::Lower:
++      return kLowerRows;
++    case Layer::Upper:
++      return kUpperRows;
++    case Layer::Symbols:
++      return kSymbolsRows;
++    case Layer::SymbolsAlt:
++      return kSymbolsAltRows;
++    }
++    return kLowerRows;
++  }
++
++  float rowInset(std::size_t row) noexcept { return row == 1 ? 0.5F : 0.0F; }
++
++  std::optional<KeyOutput> outputFor(const KeyCap& key) noexcept {
++    switch (key.action) {
++    case KeyAction::Character: {
++      const std::uint32_t cp = firstCodepoint(key.text);
++      if (cp == 0) {
++        return std::nullopt;
++      }
++      const xkb_keysym_t sym = xkb_utf32_to_keysym(cp);
++      if (sym == XKB_KEY_NoSymbol) {
++        return std::nullopt;
++      }
++      return KeyOutput{.sym = sym, .utf32 = cp};
++    }
++    case KeyAction::Backspace:
++      return fromKeysym(XKB_KEY_BackSpace);
++    case KeyAction::Enter:
++      return fromKeysym(XKB_KEY_Return);
++    case KeyAction::Space:
++      return fromKeysym(XKB_KEY_space);
++    case KeyAction::Shift:
++    case KeyAction::LayerToggle:
++    case KeyAction::Hide:
++      return std::nullopt;
++    }
++    return std::nullopt;
++  }
++
++  Layer nextLayer(Layer current, KeyAction action) noexcept {
++    switch (action) {
++    case KeyAction::Shift:
++      switch (current) {
++      case Layer::Lower:
++        return Layer::Upper;
++      case Layer::Upper:
++        return Layer::Lower;
++      case Layer::Symbols:
++        return Layer::SymbolsAlt;
++      case Layer::SymbolsAlt:
++        return Layer::Symbols;
++      }
++      return current;
++    case KeyAction::LayerToggle:
++      return (current == Layer::Lower || current == Layer::Upper) ? Layer::Symbols : Layer::Lower;
++    case KeyAction::Character:
++      return current == Layer::Upper ? Layer::Lower : current;
++    case KeyAction::Backspace:
++    case KeyAction::Enter:
++    case KeyAction::Space:
++    case KeyAction::Hide:
++      return current;
++    }
++    return current;
++  }
++
++  std::string_view specialLabel(KeyAction action, Layer layer) noexcept {
++    switch (action) {
++    case KeyAction::LayerToggle:
++      return (layer == Layer::Lower || layer == Layer::Upper) ? "?123" : "ABC";
++    case KeyAction::Shift:
++      if (layer == Layer::Symbols) {
++        return "=\\<";
++      }
++      if (layer == Layer::SymbolsAlt) {
++        return "?123";
++      }
++      return {};
++    default:
++      return {};
++    }
++  }
++
++  std::string_view specialGlyph(KeyAction action, Layer layer) noexcept {
++    switch (action) {
++    case KeyAction::Shift:
++      if (layer == Layer::Lower) {
++        return "arrow-big-up";
++      }
++      if (layer == Layer::Upper) {
++        return "arrow-big-up-filled";
++      }
++      return {};
++    case KeyAction::Backspace:
++      return "backspace";
++    case KeyAction::Enter:
++      return "corner-down-left";
++    case KeyAction::Space:
++      return "space";
++    case KeyAction::Hide:
++      return "keyboard-hide";
++    default:
++      return {};
++    }
++  }
++
++} // namespace lockscreen_keyboard
+diff --git a/src/shell/lockscreen/lockscreen_keyboard_layout.h b/src/shell/lockscreen/lockscreen_keyboard_layout.h
+new file mode 100644
+index 0000000000..4feadee6d0
+--- /dev/null
++++ b/src/shell/lockscreen/lockscreen_keyboard_layout.h
+@@ -0,0 +1,67 @@
++#pragma once
++
++#include <array>
++#include <cstdint>
++#include <optional>
++#include <span>
++#include <string_view>
++
++// Pure layout and keymap data for the lockscreen on-screen keyboard. Kept free of scene code so the
++// key -> keysym mapping and layer transitions are unit-testable.
++namespace lockscreen_keyboard {
++
++  enum class KeyAction : std::uint8_t {
++    Character,
++    Shift, // Lower <-> Upper; Symbols <-> SymbolsAlt
++    Backspace,
++    Enter,
++    Space,
++    LayerToggle, // letters <-> symbols
++    Hide,
++  };
++
++  enum class Layer : std::uint8_t {
++    Lower,
++    Upper,
++    Symbols,
++    SymbolsAlt,
++  };
++
++  struct KeyCap {
++    KeyAction action = KeyAction::Character;
++    // UTF-8 text for Character keys; empty for special keys (their label depends on the layer).
++    std::string_view text;
++    // Width in key units (1.0 is a regular letter key).
++    float width = 1.0F;
++  };
++
++  constexpr std::size_t kRowCount = 4;
++
++  // Every layer has the same number of keys per row and the same special keys at the same positions,
++  // so the UI can build its buttons once and only relabel them when the layer changes.
++  using LayerRows = std::array<std::span<const KeyCap>, kRowCount>;
++
++  [[nodiscard]] const LayerRows& rowsFor(Layer layer) noexcept;
++
++  // Indent, in key units, applied on both sides of a row (row 1 is offset by half a key).
++  [[nodiscard]] float rowInset(std::size_t row) noexcept;
++
++  struct KeyOutput {
++    std::uint32_t sym = 0;
++    std::uint32_t utf32 = 0;
++  };
++
++  // The keysym/codepoint pair a hardware keyboard would report for this key, or nullopt for keys
++  // that only change the keyboard's own state (Shift, LayerToggle, Hide).
++  [[nodiscard]] std::optional<KeyOutput> outputFor(const KeyCap& key) noexcept;
++
++  // The layer to show after `action` is pressed on `current`. Upper is one-shot: typing a character
++  // returns to Lower.
++  [[nodiscard]] Layer nextLayer(Layer current, KeyAction action) noexcept;
++
++  // Text label for special keys on `layer` (empty when the key shows a glyph instead).
++  [[nodiscard]] std::string_view specialLabel(KeyAction action, Layer layer) noexcept;
++  // Glyph name for special keys (empty when the key shows text).
++  [[nodiscard]] std::string_view specialGlyph(KeyAction action, Layer layer) noexcept;
++
++} // namespace lockscreen_keyboard
+diff --git a/src/shell/settings/settings_registry_security.cpp b/src/shell/settings/settings_registry_security.cpp
+index 4f440f0180..de9fd3fe2d 100644
+--- a/src/shell/settings/settings_registry_security.cpp
++++ b/src/shell/settings/settings_registry_security.cpp
+@@ -96,6 +96,16 @@ namespace settings::registry {
+       e.visibleWhen = lockscreenOn;
+       entries.push_back(std::move(e));
+     }
++    {
++      auto e = makeEntry(
++          SettingsSection::LockScreen, "general", tr("settings.schema.lockscreen.keyboard.label"),
++          tr("settings.schema.lockscreen.keyboard.description"), {"lockscreen", "keyboard"},
++          asSegmented(enumSelect(kOnScreenKeyboardModes, cfg.lockscreen.keyboard)),
++          "on-screen virtual keyboard osk touch tablet phone"
++      );
++      e.visibleWhen = lockscreenOn;
++      entries.push_back(std::move(e));
++    }
+     {
+       auto e = makeEntry(
+           SettingsSection::LockScreen, "general", tr("settings.schema.lockscreen.grace-period.label"),
+diff --git a/tests/lockscreen_keyboard_layout_test.cpp b/tests/lockscreen_keyboard_layout_test.cpp
+new file mode 100644
+index 0000000000..444c85f82e
+--- /dev/null
++++ b/tests/lockscreen_keyboard_layout_test.cpp
+@@ -0,0 +1,95 @@
++#include "shell/lockscreen/lockscreen_keyboard_layout.h"
++#include "tests/test_check.h"
++
++#include <xkbcommon/xkbcommon-keysyms.h>
++
++using namespace lockscreen_keyboard;
++
++namespace {
++
++  float rowUnits(std::span<const KeyCap> row, std::size_t index) {
++    float units = rowInset(index) * 2.0F;
++    for (const KeyCap& key : row) {
++      units += key.width;
++    }
++    return units;
++  }
++
++  const KeyCap* findAction(Layer layer, KeyAction action) {
++    for (const auto& row : rowsFor(layer)) {
++      for (const KeyCap& key : row) {
++        if (key.action == action) {
++          return &key;
++        }
++      }
++    }
++    return nullptr;
++  }
++
++} // namespace
++
++int main() {
++  // Every layer shares one geometry so the UI can relabel buttons in place.
++  constexpr Layer kLayers[] = {Layer::Lower, Layer::Upper, Layer::Symbols, Layer::SymbolsAlt};
++  for (const Layer layer : kLayers) {
++    const auto& rows = rowsFor(layer);
++    const auto& base = rowsFor(Layer::Lower);
++    for (std::size_t r = 0; r < kRowCount; ++r) {
++      TEST_CHECK(rows[r].size() == base[r].size());
++      TEST_NEAR(rowUnits(rows[r], r), 10.0F, 1e-4);
++      for (std::size_t i = 0; i < rows[r].size(); ++i) {
++        TEST_CHECK(rows[r][i].action == base[r][i].action);
++        TEST_NEAR(rows[r][i].width, base[r][i].width, 1e-6);
++        if (rows[r][i].action == KeyAction::Character) {
++          TEST_CHECK(outputFor(rows[r][i]).has_value());
++        }
++      }
++    }
++  }
++
++  // Characters report the keysym and codepoint a hardware key would.
++  const auto q = outputFor(rowsFor(Layer::Lower)[0][0]);
++  TEST_CHECK(q.has_value() && q->sym == XKB_KEY_q && q->utf32 == 'q');
++  const auto upperQ = outputFor(rowsFor(Layer::Upper)[0][0]);
++  TEST_CHECK(upperQ.has_value() && upperQ->sym == XKB_KEY_Q && upperQ->utf32 == 'Q');
++  const auto one = outputFor(rowsFor(Layer::Symbols)[0][0]);
++  TEST_CHECK(one.has_value() && one->sym == XKB_KEY_1 && one->utf32 == '1');
++  const auto euro = outputFor(KeyCap{.action = KeyAction::Character, .text = "€"});
++  TEST_CHECK(euro.has_value() && euro->utf32 == 0x20ACU && euro->sym == XKB_KEY_EuroSign);
++  TEST_CHECK(!outputFor(KeyCap{.action = KeyAction::Character, .text = ""}).has_value());
++  TEST_CHECK(!outputFor(KeyCap{.action = KeyAction::Character, .text = "\xE2\x82"}).has_value());
++
++  const auto backspace = outputFor(*findAction(Layer::Lower, KeyAction::Backspace));
++  TEST_CHECK(backspace.has_value() && backspace->sym == XKB_KEY_BackSpace && backspace->utf32 == 0x08U);
++  const auto enter = outputFor(*findAction(Layer::Lower, KeyAction::Enter));
++  TEST_CHECK(enter.has_value() && enter->sym == XKB_KEY_Return && enter->utf32 == 0x0DU);
++  const auto space = outputFor(*findAction(Layer::Lower, KeyAction::Space));
++  TEST_CHECK(space.has_value() && space->sym == XKB_KEY_space && space->utf32 == ' ');
++  TEST_CHECK(!outputFor(*findAction(Layer::Lower, KeyAction::Shift)).has_value());
++  TEST_CHECK(!outputFor(*findAction(Layer::Lower, KeyAction::LayerToggle)).has_value());
++  TEST_CHECK(!outputFor(*findAction(Layer::Lower, KeyAction::Hide)).has_value());
++
++  // Shift is one-shot on letters and pages between the two symbol layers.
++  TEST_CHECK(nextLayer(Layer::Lower, KeyAction::Shift) == Layer::Upper);
++  TEST_CHECK(nextLayer(Layer::Upper, KeyAction::Shift) == Layer::Lower);
++  TEST_CHECK(nextLayer(Layer::Upper, KeyAction::Character) == Layer::Lower);
++  TEST_CHECK(nextLayer(Layer::Lower, KeyAction::Character) == Layer::Lower);
++  TEST_CHECK(nextLayer(Layer::Symbols, KeyAction::Character) == Layer::Symbols);
++  TEST_CHECK(nextLayer(Layer::Symbols, KeyAction::Shift) == Layer::SymbolsAlt);
++  TEST_CHECK(nextLayer(Layer::SymbolsAlt, KeyAction::Shift) == Layer::Symbols);
++  TEST_CHECK(nextLayer(Layer::Lower, KeyAction::LayerToggle) == Layer::Symbols);
++  TEST_CHECK(nextLayer(Layer::Upper, KeyAction::LayerToggle) == Layer::Symbols);
++  TEST_CHECK(nextLayer(Layer::SymbolsAlt, KeyAction::LayerToggle) == Layer::Lower);
++  TEST_CHECK(nextLayer(Layer::Upper, KeyAction::Backspace) == Layer::Upper);
++
++  // Every special key shows either a label or a glyph.
++  constexpr KeyAction kSpecials[] = {KeyAction::Shift, KeyAction::Backspace,   KeyAction::Enter,
++                                     KeyAction::Space, KeyAction::LayerToggle, KeyAction::Hide};
++  for (const Layer layer : kLayers) {
++    for (const KeyAction action : kSpecials) {
++      TEST_CHECK(!specialLabel(action, layer).empty() || !specialGlyph(action, layer).empty());
++    }
++  }
++
++  return 0;
++}

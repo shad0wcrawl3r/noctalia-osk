@@ -1,0 +1,7 @@
+# Builds Fedora's noctalia with the lock-screen on-screen keyboard patch.
+# Output: RPMs in /out, or nothing once Fedora's noctalia has the feature.
+#   podman build -f build/Containerfile -t noctalia-osk .
+FROM registry.fedoraproject.org/fedora:45
+COPY patches /patches
+COPY build/build-noctalia.sh /build-noctalia.sh
+RUN --mount=type=cache,dst=/var/cache/libdnf5 /build-noctalia.sh
