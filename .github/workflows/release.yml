@@ -112,6 +112,8 @@ jobs:
       attestations: write  # store it
     env:
       GH_TOKEN: ${{ github.token }}
+      # No checkout in this job, so tell gh which repository to use.
+      GH_REPO: ${{ github.repository }}
       TAG: ${{ needs.prepare.outputs.tag }}
       EVR: ${{ needs.prepare.outputs.evr }}
       REV: ${{ needs.prepare.outputs.rev }}
