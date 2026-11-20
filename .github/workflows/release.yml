@@ -21,15 +21,20 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  release:
-    name: Build and release
+  # Resolves the tag and, before spending ~70 min compiling, proves this
+  # workflow can create the release (a draft) so permission problems fail fast.
+  prepare:
+    name: Resolve tag and preflight
     runs-on: ubuntu-26.04
     permissions:
-      contents: write      # create the release
-      id-token: write      # sign the provenance attestation
-      attestations: write  # store it
+      contents: write
     env:
       GH_TOKEN: ${{ github.token }}
+    outputs:
+      evr: ${{ steps.tag.outputs.evr }}
+      rev: ${{ steps.tag.outputs.rev }}
+      tag: ${{ steps.tag.outputs.tag }}
+      exists: ${{ steps.tag.outputs.exists }}
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -45,15 +50,37 @@ jobs:
           [[ "$rev" =~ ^[0-9]+$ ]]
           tag="${evr}-r${rev}"
           { echo "evr=$evr"; echo "rev=$rev"; echo "tag=$tag"; } >> "$GITHUB_OUTPUT"
-          if gh release view "$tag" >/dev/null 2>&1; then
-            echo "exists=true" >> "$GITHUB_OUTPUT"
+          published="$(gh release view "$tag" --json isDraft -q '.isDraft == false' 2>/dev/null || echo false)"
+          echo "exists=$published" >> "$GITHUB_OUTPUT"
+          if [[ "$published" == true ]]; then
             echo "Release \`$tag\` already exists; nothing to do." >> "$GITHUB_STEP_SUMMARY"
-          else
-            echo "exists=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Build patched Noctalia
+      - name: "Preflight: create the draft release"
         if: steps.tag.outputs.exists != 'true'
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+          EVR: ${{ steps.tag.outputs.evr }}
+          REV: ${{ steps.tag.outputs.rev }}
+        run: |
+          set -euo pipefail
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" --draft --target "$GITHUB_SHA" \
+              --title "noctalia $EVR (lock-screen keyboard, r$REV)" --notes "Building..."
+          fi
+
+  build:
+    name: Build
+    needs: prepare
+    if: needs.prepare.outputs.exists != 'true'
+    runs-on: ubuntu-26.04
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Build patched Noctalia
         run: |
           set -euo pipefail
           podman build -f build/Containerfile -t localhost/noctalia-osk .
@@ -62,14 +89,44 @@ jobs:
           podman cp "$cid:/out/." out/
           podman rm "$cid"
           ls -la out
+          # upload-artifact rejects an empty directory.
+          touch out/.built
+
+      # Kept so a failed publish can be re-run alone, without recompiling.
+      - name: Save build output
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: noctalia-osk-${{ needs.prepare.outputs.tag }}
+          path: out/
+          include-hidden-files: true
+          retention-days: 14
+          if-no-files-found: error
+
+  publish:
+    name: Attest and publish
+    needs: [prepare, build]
+    runs-on: ubuntu-26.04
+    permissions:
+      contents: write      # upload assets and publish the release
+      id-token: write      # sign the provenance attestation
+      attestations: write  # store it
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ needs.prepare.outputs.tag }}
+      EVR: ${{ needs.prepare.outputs.evr }}
+      REV: ${{ needs.prepare.outputs.rev }}
+    steps:
+      - name: Fetch build output
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: noctalia-osk-${{ needs.prepare.outputs.tag }}
+          path: out
 
       - name: Checksums
         id: sums
-        if: steps.tag.outputs.exists != 'true'
-        env:
-          EVR: ${{ steps.tag.outputs.evr }}
         run: |
           set -euo pipefail
+          rm -f out/.built
           cd out
           if compgen -G '*.rpm' >/dev/null; then
             echo "has_rpm=true" >> "$GITHUB_OUTPUT"
@@ -82,17 +139,13 @@ jobs:
           cat SHA256SUMS
 
       - name: Attest build provenance
-        if: steps.tag.outputs.exists != 'true' && steps.sums.outputs.has_rpm == 'true'
+        if: steps.sums.outputs.has_rpm == 'true'
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: 'out/*.rpm'
 
       - name: Publish release
-        if: steps.tag.outputs.exists != 'true'
         env:
-          TAG: ${{ steps.tag.outputs.tag }}
-          EVR: ${{ steps.tag.outputs.evr }}
-          REV: ${{ steps.tag.outputs.rev }}
           HAS_RPM: ${{ steps.sums.outputs.has_rpm }}
         run: |
           set -euo pipefail
@@ -114,9 +167,8 @@ jobs:
             echo
             echo "Built by ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID} from \`${GITHUB_SHA}\`."
           } > notes.md
-          # Releases are immutable once published, so upload into a draft first.
-          gh release create "$TAG" --draft --target "$GITHUB_SHA" \
-            --title "noctalia $EVR (lock-screen keyboard, r$REV)" --notes-file notes.md
-          gh release upload "$TAG" out/*
+          # Releases are immutable once published, so fill the draft first.
+          gh release edit "$TAG" --notes-file notes.md
+          gh release upload "$TAG" out/* --clobber
           gh release edit "$TAG" --draft=false --latest
           echo "Published [\`$TAG\`](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases/tag/$TAG)." >> "$GITHUB_STEP_SUMMARY"
